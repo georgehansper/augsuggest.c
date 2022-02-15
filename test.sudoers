@@ -1,0 +1,19 @@
+# First Preference, chosen_tail NULL value
+Defaults   !requiretty
+Defaults    env_reset
+
+# First preference
+Defaults    env_keep =  "COLORS DISPLAY HOSTNAME HISTSIZE KDEDIR LS_COLORS"
+
+# Third preference, first_tail NULL value
+Defaults    env_keep += "MAIL PS1 PS2 USERNAME"
+Defaults    env_keep += "LANG LC_CTYPE"
+
+# First preference
+Defaults    secure_path = /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+root	ALL=(ALL) 	ALL
+%wheel	ALL=(ALL)	NOPASSWD: ALL
+
+# Simple path
+#includedir /etc/sudoers.d

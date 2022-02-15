@@ -1,0 +1,35 @@
+# ----------------
+# First preference:
+# - find a unique first_tail, and use that, eg 127.0.0.1 and ::1
+127.0.0.1    localhost localhost4 localhost.localdomain   # ipv4
+::1          localhost localhost6                         # ipv6
+# Second preference:
+# - find a unique value (other than the first one) and use that, eg canonical
+192.0.2.2    chosen1   alias2a
+192.0.2.2    canonical chosen2  alias2
+192.0.2.2    canonical chosen3  alias3
+# ----------------
+# Third preference
+# - find a unique combination of first_tail and another tail
+192.0.2.31   third_preference alias3a
+192.0.2.31   third_preference alias3b
+192.0.2.32   third_preference alias3a
+192.0.2.32   third_preference alias3b
+# ----------------
+# Fourth preference
+# - cannot find a _suitable_ unique tail, just append a position within the set of first-tails
+192.0.2.4    fourth alias4 ignored1
+192.0.2.4    fourth alias4 ignored2
+# ----------------
+# "double-quoted"
+# 'single quoted'
+# Comment	tab->		<-tab
+# Comment \backslash \\double-backslash
+# Repeated comment
+# Repeated comment
+# ----------------
+# [])(|.*?$^\ regexp challenge
+# The following entries have an alias
+# so that the "Second Preference" above can succeed for alias2 and alias3
+192.0.2.99   canonical_re alias
+192.0.2.99   canonical.re alias
