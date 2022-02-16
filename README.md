@@ -215,3 +215,5 @@ because the same comment appears twice in the file.
 
 The resulting output is still idempotent, but the path for the `#comment` is no longer "independant of position"
 
+
+Copyright (C) 2022 George Hansper <george@hansper.id.au>
