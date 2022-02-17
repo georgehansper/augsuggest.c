@@ -16,7 +16,7 @@ mkdir -p tmp/etc/squid
 AUGEAS_ROOT=$PWD/tmp augtool -f test.squid.augtool --noload --autosave
 diff -bu test.squid.conf tmp/etc/squid/squid.conf
 echo '---------- sudoers ------------'
-./augsuggest --pretty --regexp --target=/etc/sudoers test.sudoers > test.sudoers.augtool
+./augsuggest --pretty          --target=/etc/sudoers test.sudoers > test.sudoers.augtool
 AUGEAS_ROOT=$PWD/tmp augtool -f test.sudoers.augtool --noload --autosave
 
 echo '========== augeas does not re-create empty lines for most lenses =========='

@@ -29,7 +29,7 @@
 # Repeated comment
 # ----------------
 # [])(|.*?$^\ regexp challenge
-# The following entries have an alias
-# so that the "Second Preference" above can succeed for alias2 and alias3
+# The following entries need to have an alias appended
+# so that the "Second Preference" can be used above for alias2 and alias3
 192.0.2.99   canonical_re alias
 192.0.2.99   canonical.re alias
