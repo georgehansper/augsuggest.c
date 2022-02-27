@@ -65,9 +65,10 @@
 #include <getopt.h>
 #include <string.h>
 #include <augeas.h>
-#include "augsuggest.h"
+#include <errno.h>
 #include <malloc.h>
 #include <sys/param.h>     /* for MIN() MAX() */
+#include "augsuggest.h"
 
 #define CHECK_OOM(condition, action, arg)         \
     do {                                          \
@@ -111,6 +112,71 @@ void exit_oom(char *msg) {
   exit(1);
 }
 
+/* Remove /./ and /../ components from path
+ * because they just don't work with augeas
+ */
+void cleanup_filepath(char *path) {
+  char *to=path, *from=path;
+  while(*from) {
+    if(*from == '/' ) {
+      if( *(from+1) == '/' ) {
+          /* // skip over 2nd / */
+          from++;
+          continue;
+      } else if( *(from+1) == '.' ) {
+        if( *(from+2) == '/' ) {
+          /* /./ skip 2 spaces */
+          from+=2;
+          continue;
+        } else if ( *(from+2) == '.' && *(from+3) == '/' ) {
+          /* /../ rewind to previous / */
+          from+=3;
+          while( to > path && *(--to) != '/' )
+            ;
+          continue;
+        }
+      }
+    }
+    *to++ = *from++;
+  }
+  *to='\0';
+}
+
+char *find_lens_for_path(char *filename) {
+  char *aug_load_path = NULL;
+  char **matching_lenses;
+  int  num_lenses, result, ndx;
+  char *filename_tail;
+  filename_tail = filename;
+  for (char *s1 = filename; *s1; s1++ ) {
+     if ( *s1 == '/' )
+       filename_tail = s1+1;
+  }
+  result = asprintf(&aug_load_path, "/augeas/load/*['%s' =~ glob(incl)]['%s' !~ glob(excl)]['%s' !~ glob(excl)]", filename, filename, filename_tail);
+  CHECK_OOM( result < 0, exit_oom, NULL);
+
+  if(debug) {
+    fprintf(stderr,"path expr: %s\n",aug_load_path);
+    aug_print(aug, stderr, aug_load_path);
+  }
+  num_lenses = aug_match( aug, aug_load_path, &matching_lenses);
+  if ( num_lenses == 0 ) {
+    fprintf(stderr, "Aborting - no lens applies for target: %s\n", filename);
+    exit(1);
+  }
+  lens = matching_lenses[0] + 13; /* skip over /augeas/load */
+
+  if ( num_lenses > 1 ) {
+    /* Should never happen */
+    for( ndx=0; ndx<num_lenses;ndx++) {
+      fprintf(stderr,"Found lens: %s\n", matching_lenses[ndx]);
+    }
+    fprintf(stderr, "Warning: multiple lenses apply to target %s - using %s\n", filename, lens);
+  }
+
+  free(aug_load_path);
+  return(lens);
+}
 /* ----- split_path() str_next_pos() str_simplified_tail() add_segment_to_group() ----- */
 /* split_path()
  * Break up a path like this
@@ -1059,8 +1125,8 @@ void choose_re_width(struct group *group) {
       if ( tail_ptr != chosen_tail ) {
         if( strcmp(tail_ptr->simple_tail, chosen_tail->simple_tail) == 0 ) {
           value_cmp(tail_ptr->value, chosen_tail->value, &re_width);
-          if( re_width > max_re_width_ct ) {
-            max_re_width_ct = re_width;
+          if( re_width + 1 > max_re_width_ct ) {
+            max_re_width_ct = re_width+1;
           }
         }
       }
@@ -1071,8 +1137,8 @@ void choose_re_width(struct group *group) {
         if ( tail_ptr != first_tail ) {
           if( strcmp(tail_ptr->simple_tail, first_tail->simple_tail) == 0 ) {
             value_cmp(tail_ptr->value, first_tail->value, &re_width);
-            if( re_width > max_re_width_ft ) {
-              max_re_width_ft = re_width;
+            if( re_width + 1 > max_re_width_ft ) {
+              max_re_width_ft = re_width+1;
             }
           }
         }
@@ -1323,7 +1389,7 @@ char *regexp_value(char *value, int max_len) {
       default:
     }
     *t = *s;
-    if( ( s - value ) >= max_len  && *(s+1)!='\0' && *(s+2)!='\0' && *(s+3)!='\0' ) {
+    if( ( s - value ) + 1 >= max_len  && *(s+1)!='\0' && *(s+2)!='\0' && *(s+3)!='\0' ) {
       /* don't append .* if there are only one or two chars left in the string */
       t++;
       *t++='.';
@@ -1340,15 +1406,15 @@ void usage(char *progname) {
   if(progname == NULL)
     progname = "augsuggest";
   fprintf(stdout, "Usage:\n\t%s [--target=realname] [--lens=Lensname] [--pretty] [--regexp[=n]] [--noseq] /path/filename\n\n",progname);
-  fprintf(stdout, "\t    --target ... use this as the filename in the output set-commands\n");
-  fprintf(stdout, "\t                 this filename also implies the default lens to use\n");
-  fprintf(stdout, "\t    --lens   ... override the default lens and target and use this one\n");
-  fprintf(stdout, "\t    --pretty ... make the output more readable\n");
-  fprintf(stdout, "\t    --regexp ... use regexp() in path-expressions instead of absolute values\n");
-  fprintf(stdout, "\t                 if followed by number, this is the minimum length of the regexp to use\n");
-  fprintf(stdout, "\t    --noseq  ... use * instead of seq::* (useful for compatability with augeas < 1.13.0)\n");
-  fprintf(stdout, "\t    --help   ... this message\n");
-  fprintf(stdout, "\t    /path/filename   ... full pathname to the file being analysed (required)\n\n");
+  fprintf(stdout, "\t  -t, --target ... use this as the filename in the output set-commands\n");
+  fprintf(stdout, "\t                   this filename also implies the default lens to use\n");
+  fprintf(stdout, "\t  -l, --lens   ... override the default lens and target and use this one\n");
+  fprintf(stdout, "\t  -p, --pretty ... make the output more readable\n");
+  fprintf(stdout, "\t  -r, --regexp ... use regexp() in path-expressions instead of absolute values\n");
+  fprintf(stdout, "\t                   if followed by number, this is the minimum length of the regexp to use\n");
+  fprintf(stdout, "\t  -s, --noseq  ... use * instead of seq::* (useful for compatability with augeas < 1.13.0)\n");
+  fprintf(stdout, "\t  -h, --help   ... this message\n");
+  fprintf(stdout, "\t  /path/filename   ... full pathname to the file being analysed (required)\n\n");
   fprintf(stdout, "%s will generate a script of augtool set-commands suitable for rebuilding the file specified\n", progname);
   fprintf(stdout, "If --target is specified, then the lens associated with the target will be use to parse the file\n");
   fprintf(stdout, "If --lens is specified, then the given lens will be used, overriding the default, and --target\n\n");
@@ -1365,8 +1431,10 @@ void usage(char *progname) {
 
 int main(int argc, char **argv) {
   int opt;
+  char *augeas_root = getenv("AUGEAS_ROOT");
   char *inputfile = NULL;
   char *target_file = NULL;
+  char *program_name = basename(argv[0]);
 
   while (1) {
     int option_index = 0;
@@ -1383,7 +1451,7 @@ int main(int argc, char **argv) {
         {0,         0,                 0,           0 } /* marker for end of data */
       };
 
-    opt = getopt_long(argc, argv, "vdhl:sSrpt:", long_options, &option_index);
+    opt = getopt_long(argc, argv, "vdhl:sSr::pt:", long_options, &option_index);
     if (opt == -1)
        break;
 
@@ -1401,7 +1469,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(long_options[option_index].name, "target") == 0) {
           target_file = optarg;
           if( *target_file != '/' ) {
-            fprintf(stderr,"Error: target \"%s\" must be an absolute path\neg.\n\t--target=/etc/%s\n", target_file, target_file);
+            fprintf(stderr,"%s: Error: target \"%s\" must be an absolute path\neg.\n\t--target=/etc/%s\n", program_name, target_file, target_file);
             exit(1);
           }
           if(debug) fprintf(stderr,"target_file=%s\n",target_file);
@@ -1410,6 +1478,7 @@ int main(int argc, char **argv) {
             int optarg_int = strtol(optarg, NULL, 0);
             if(optarg_int > 0)
               use_regexp = optarg_int;
+            /* else use the default 1 set by getopt() */
           } else {
             use_regexp = 8;
           }
@@ -1437,10 +1506,23 @@ int main(int argc, char **argv) {
         break;
       case 'l':
         lens = optarg;
+        flags |= AUG_NO_MODL_AUTOLOAD;
         if(debug) fprintf(stderr,"Lens=%s\n", optarg);
         break;
+      case 't':
+        target_file = optarg;
+        if( *target_file != '/' ) {
+          fprintf(stderr,"%s: Error: target \"%s\" must be an absolute path\neg.\n\t--target=/etc/%s\n", program_name, target_file, target_file);
+          exit(1);
+        }
+        break;
       case 'r':
+        if(optarg) {
+          int optarg_int = strtol(optarg, NULL, 0);
+          use_regexp = optarg_int > 0 ? optarg_int : 8;
+        }
         use_regexp = use_regexp ? use_regexp : 8;
+        if(debug) fprintf(stderr,"regexp=%d\n",use_regexp);
         break;
 
       case '?':    /* unknown option */
@@ -1452,7 +1534,7 @@ int main(int argc, char **argv) {
   }
 
   if( help ) {
-    usage(argv[0]);
+    usage(program_name);
     exit(0);
   }
   if (optind == argc-1) {
@@ -1473,52 +1555,41 @@ int main(int argc, char **argv) {
     }
   } else if( optind == argc ) {
     /* No non-option args given (missing inputfile) */
-    fprintf(stderr,"Missing command-line argument\nPlease specify a filename to read eg.\n\t%s %s\n", argv[0], "/etc/hosts");
-    fprintf(stderr, "\nTry '%s --help' for more information.\n", argv[0]);
+    fprintf(stderr,"Missing command-line argument\nPlease specify a filename to read eg.\n\t%s %s\n", program_name, "/etc/hosts");
+    fprintf(stderr, "\nTry '%s --help' for more information.\n", program_name);
     exit(1);
   } else {
     /* Too many args - we only want one */
-    fprintf(stderr,"Too many command-line arguments\nPlease specify only one filename to read eg.\n\t%s %s\n", argv[0], "/etc/hosts");
-    fprintf(stderr, "\nTry '%s --help' for more information.\n", argv[0]);
+    fprintf(stderr,"Too many command-line arguments\nPlease specify only one filename to read eg.\n\t%s %s\n", program_name, "/etc/hosts");
+    fprintf(stderr, "\nTry '%s --help' for more information.\n", program_name);
     exit(1);
   }
 
-  if(debug) fprintf(stderr,"%s: AUGEAS_ROOT=%s, Inputfile: %s\n", argv[0], getenv("AUGEAS_ROOT"), inputfile);
+  if(debug) fprintf(stderr,"%s: AUGEAS_ROOT=%s, Inputfile: %s\n", program_name, augeas_root, inputfile);
+
+  if(debug) fprintf(stderr,"Before %s\n", inputfile);
+  cleanup_filepath(inputfile);
+  if(debug) fprintf(stderr,"After %s\n", inputfile);
+  char *inputfile_real;
+  if( augeas_root != NULL ) {
+    int result = asprintf(&inputfile_real, "%s/%s", augeas_root, inputfile );
+    if ( result == -1 ) {
+      perror(program_name);
+      exit(1);
+    }
+  } else {
+    inputfile_real = inputfile;
+  }
+  if( access(inputfile_real, F_OK|R_OK) ) {
+    fprintf(stderr, "%s: Could not access file %s: %s\n", program_name, inputfile_real, strerror(errno));
+    exit(1);
+  }
 
   aug = aug_init(NULL, loadpath, flags|AUG_NO_ERR_CLOSE|AUG_NO_LOAD);
 
   if ( target_file != NULL && lens == NULL ) {
     /* Infer the lens which applies to the --target_file option */
-    char *aug_load_path = NULL;
-    char **matching_lenses;
-    int  num_lenses, result, ndx;
-    char *target_file_tail;
-    target_file_tail = target_file;
-    for (char *s1 = target_file; *s1; s1++ ) {
-       if ( *s1 == '/' )
-         target_file_tail = s1+1;
-    }
-    result = asprintf(&aug_load_path, "/augeas/load/*['%s' =~ glob(incl)]['%s' !~ glob(excl)]['%s' !~ glob(excl)]", target_file, target_file, target_file_tail);
-    CHECK_OOM( result < 0, exit_oom, NULL);
-
-    if(debug) {
-      fprintf(stderr,"path expr: %s\n",aug_load_path);
-      aug_print(aug, stderr, aug_load_path);
-    }
-    num_lenses = aug_match( aug, aug_load_path, &matching_lenses);
-    if ( num_lenses == 0 ) {
-      fprintf(stderr, "Aborting - no lens applies for target: %s\n", target_file);
-      exit(1);
-    }
-    lens = matching_lenses[0] + 13; /* skip over /augeas/load */
-
-    if ( num_lenses > 1 ) {
-      /* Should never happen */
-      for( ndx=0; ndx<num_lenses;ndx++) {
-        fprintf(stderr,"Found lens: %s\n", matching_lenses[ndx]);
-      }
-      fprintf(stderr, "Warning: multiple lenses apply to target %s - using %s\n", target_file, lens);
-    }
+    lens = find_lens_for_path(target_file);
   }
 
   if ( lens != NULL ) {
@@ -1528,18 +1599,27 @@ int main(int argc, char **argv) {
       /* There's no need to output a transform, because we just searched for it anyway */
       if (verbose) printf("transform %s incl %s\n", lens, target_file);
     } else {
+      printf("setm /augeas/load/*[incl='%s' and label() != '%s']/excl '%s'\n", inputfile, lens, inputfile);
       printf("transform %s incl %s\n", lens, inputfile);
+      printf("load-file %s\n", inputfile);
     }
 
     if ( aug_transform(aug, lens, inputfile, 0) != 0 ) {
       fprintf(stderr, "%s\n", aug_error_details(aug));
       exit(1);
     }
+  } else {
+    /* --lens not specified, print the default lens as a comment if --verbose specified */
+    if( verbose ) {
+      char *default_lens;
+      default_lens = find_lens_for_path( inputfile );
+      printf("# Using default lens: %s\n# transform %s incl %s\n", default_lens, default_lens, inputfile);
+    }
   }
 
-  if ( aug_load_file(aug, inputfile) != 0 ) {
+  if ( aug_load_file(aug, inputfile) != 0 || aug_error_details(aug) != NULL ) {
     const char *msg;
-    fprintf(stderr, "Failed to load file %s\n", inputfile);
+    fprintf(stderr, "%s: Failed to load file %s\n", program_name, inputfile);
     msg = aug_error_details(aug);
     if(msg) {
       fprintf(stderr,"%s\n",msg);
@@ -1553,6 +1633,7 @@ int main(int argc, char **argv) {
     }
     exit(1);
   }
+  if(debug) fprintf(stderr,"errno=%d %s\n", errno, aug_error_details(aug));
 
   if ( target_file ) {
     /* Rename the tree from inputfile to target_file, if specified */
@@ -1565,6 +1646,7 @@ int main(int argc, char **argv) {
     result = asprintf(&files_targetfile, "/files%s", target_file );
     CHECK_OOM( result < 0, exit_oom, NULL);
 
+    if( debug ) fprintf(stderr,"mv %s %s\n", files_inputfile, files_targetfile);
     aug_mv(aug, files_inputfile, files_targetfile);
     if( debug ) aug_print(aug, stderr, "/files");
   }
@@ -1575,6 +1657,13 @@ int main(int argc, char **argv) {
   /* descendant::* is better suited, as it allows us to prune out intermediate nodes with null values (directory-like nodes) */
   /* These would be created implicity by "set" */
   num_matched = aug_match(aug, "/files/descendant::*", &all_matches);
+  if(debug) fprintf(stderr,"errno=%d %s\n", errno, aug_error_details(aug));
+  if( num_matched == 0 ) {
+    if( lens == NULL )
+      lens = find_lens_for_path(inputfile);
+    fprintf(stderr,"%s: Failed to parse file %s using lens %s\n", program_name, inputfile, lens);
+    exit(1);
+  }
   all_augeas_paths = (struct augeas_path_value **) malloc( sizeof(struct augeas_path_value *) * num_matched);
   CHECK_OOM( all_augeas_paths == NULL, exit_oom, NULL);
 
