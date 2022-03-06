@@ -140,8 +140,8 @@ struct group {
   char                   *head;
   struct tail            *all_tails;             /* Linked list */
   struct tail_stub      **tails_at_position;     /* array of linked-lists, index is position */
-  struct tail           **chosen_tail;           /* array of (struct tail) pointers, index is position */
-  struct tail           **first_tail;            /* array of (struct tail) pointers, index is position */
+  struct tail           **chosen_tail;           /* array of (struct tail)      pointers, index is position */
+  struct tail_stub      **first_tail;            /* array of (struct tail_stub) pointers, index is position */
   unsigned long           max_position;          /* highest position seen for this group */
   unsigned long           position_array_size;   /* array size for arrays indexed by position, >= max_position+1, used for malloc() */
   chosen_tail_state_t    *chosen_tail_state;     /* array, index is position */

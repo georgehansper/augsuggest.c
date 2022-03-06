@@ -106,8 +106,11 @@ char *regexp_value(char *, int);
 
 
 void exit_oom(char *msg) {
-  if( out_of_memory ) {
-    fprintf(stderr, "Out of memory%s%s\n", msg ? " ": "", msg);
+  fprintf(stderr, "Out of memory");
+  if( msg ) {
+    fprintf(stderr, " %s\n", msg);
+  } else {
+    fprintf(stderr, "\n");
   }
   exit(1);
 }
@@ -176,6 +179,45 @@ char *find_lens_for_path(char *filename) {
 
   free(aug_load_path);
   return(lens);
+}
+
+void move_tree(char *inputfile, char *target_file) {
+  char *files_inputfile;
+  char *files_targetfile;
+  char *dangling_path;
+  char *aug_rm_path;
+  int  result;
+  int  removed;
+  char *last, *s;
+  result = asprintf(&files_inputfile, "/files%s", inputfile );
+  CHECK_OOM( result < 0, exit_oom, NULL);
+
+  result = asprintf(&files_targetfile, "/files%s", target_file );
+  CHECK_OOM( result < 0, exit_oom, NULL);
+
+  if( debug ) fprintf(stderr,"mv %s %s\n", files_inputfile, files_targetfile);
+  aug_mv(aug, files_inputfile, files_targetfile);
+  if( debug ) aug_print(aug, stderr, "/files");
+  /* After the aug_mv, we're left with the empty parent nodes */
+  dangling_path = files_inputfile;
+  do {
+    /* dirname(prune_path), without copying anything */
+    for( s=last=dangling_path; *s; s++ ) {
+      if( *s == '/')
+        last=s;
+    }
+    *last = '\0';
+
+    result = asprintf(&aug_rm_path, "%s[count(*)=0 and .='']", dangling_path );
+    CHECK_OOM( result < 0, exit_oom, NULL);
+
+    removed = aug_rm(aug, aug_rm_path);
+    free(aug_rm_path);
+
+  } while ( removed == 1 );
+
+  free(files_inputfile);
+  free(files_targetfile);
 }
 /* ----- split_path() str_next_pos() str_simplified_tail() add_segment_to_group() ----- */
 /* split_path()
@@ -541,12 +583,12 @@ void append_tail_stub(struct group *group, struct tail *tail, unsigned long posi
  */
 void grow_position_arrays(struct group *group, unsigned long new_max_position) {
   struct tail_stub **tails_at_position_realloc;
-  struct tail     **chosen_tail_realloc;
-  struct tail     **first_tail_realloc;
-  unsigned int     *chosen_tail_state_realloc;
-  unsigned int     *pretty_width_ct_realloc;
-  unsigned int     *re_width_ct_realloc;
-  unsigned int     *re_width_ft_realloc;
+  struct tail      **chosen_tail_realloc;
+  struct tail_stub **first_tail_realloc;
+  unsigned int      *chosen_tail_state_realloc;
+  unsigned int      *pretty_width_ct_realloc;
+  unsigned int      *re_width_ct_realloc;
+  unsigned int      *re_width_ft_realloc;
   if( new_max_position != ULONG_MAX && new_max_position >= group->position_array_size ) {
     unsigned long old_size = group->position_array_size;
     unsigned long new_size = (new_max_position+1) / 8 * 8 + 8;
@@ -555,7 +597,7 @@ void grow_position_arrays(struct group *group, unsigned long new_max_position) {
     /* Grow arrays within struct group */
     tails_at_position_realloc = reallocarray(group->tails_at_position,  sizeof(struct tail_stub *),  new_size);
     chosen_tail_realloc       = reallocarray(group->chosen_tail,        sizeof(struct tail *),       new_size);
-    first_tail_realloc        = reallocarray(group->first_tail,         sizeof(struct tail *),       new_size);
+    first_tail_realloc        = reallocarray(group->first_tail,         sizeof(struct tail_stub *),  new_size);
     chosen_tail_state_realloc = reallocarray(group->chosen_tail_state,  sizeof(chosen_tail_state_t), new_size);
     pretty_width_ct_realloc   = reallocarray(group->pretty_width_ct,    sizeof(unsigned int),        new_size);
     re_width_ct_realloc       = reallocarray(group->re_width_ct,        sizeof(unsigned int),        new_size);
@@ -630,6 +672,7 @@ void add_segment_to_group(struct path_segment *path_seg, struct augeas_path_valu
 struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first_tail) {
   struct subgroup *subgroup_ptr;
   struct subgroup **sg_pp;
+  if( debug ) fprintf(stderr, "# find_or_create_subgroup() first_tail@%lx =%s = %s\n", (long unsigned int) first_tail, first_tail->simple_tail, first_tail->value);
   for( sg_pp=&(group->subgroups); *sg_pp != NULL; sg_pp=&(*sg_pp)->next) {
     if( (*sg_pp)->first_tail == first_tail ) {
       return(*sg_pp);
@@ -652,6 +695,7 @@ struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first
 
   }
   *sg_pp = subgroup_ptr; /* Append new subgroup record to list */
+  if( debug ) fprintf(stderr, "# find_or_create_subgroup() first_tail@%lx =%s = %s - ", (long unsigned int) first_tail, first_tail->simple_tail, first_tail->value);
   /* populate matching_positions */
   unsigned long pos_ndx;
   unsigned long ndx = 0;
@@ -661,11 +705,17 @@ struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first
     for( tail_stub_ptr = group->tails_at_position[pos_ndx]; tail_stub_ptr != NULL; tail_stub_ptr=tail_stub_ptr->next ) {
       if( tail_stub_ptr->tail == first_tail ) {
         subgroup_ptr->matching_positions[ndx++] = pos_ndx;
-        group->subgroup_position[pos_ndx]=ndx; /* yes, we want ndx+1, because matching_positions index starts at 0, where as the fallback position starts at 1 */
+        if( debug ) fprintf(stderr,"[%lu] %lx ", pos_ndx, (long unsigned int) group->first_tail[pos_ndx]->tail);
+        if( first_tail == group->first_tail[pos_ndx]->tail ) {
+          /* If first_fail is also the first_tail for this position, update subgroup_position[] */
+          group->subgroup_position[pos_ndx]=ndx; /* yes, we want ndx+1, because matching_positions index starts at 0, where as the fallback position starts at 1 */
+          if( debug ) fprintf(stderr,"->%lu ", ndx); 
+        }
         break;
       }
     }
   }
+  if( debug ) fprintf(stderr,"\n");
   subgroup_ptr->matching_positions[ndx] = 0;  /* 0 = end of list */
   return(subgroup_ptr);
 }
@@ -717,12 +767,12 @@ struct tail_stub *find_first_tail(struct tail_stub *tail_stub_ptr) {
 }
 
 struct tail *choose_tail(struct group *group, unsigned long position ) {
-  struct tail_stub *first_tail;
+  struct tail_stub *first_tail_stub;
   struct tail_stub *tail_stub_ptr;
   unsigned int ndx;
 
   if( group->tails_at_position[position] == NULL ) {
-    /* first_tail == NULL
+    /* first_tail_stub == NULL
      * this does not happen, because every position gets at least one tail of ""
      * eg, even if the value is NULL.
      *   /head/1   (null)
@@ -730,27 +780,23 @@ struct tail *choose_tail(struct group *group, unsigned long position ) {
      *   ...value NULL
      * paths without a position ( /head/tail ) are not added to any group
      * We can't do anything with this, use seq::* or [*] only (no value) */
-    fprintf(stderr,"# choose_tail() %s[%lu] first_tail is NULL (internal error)\n", group->head, position);
+    fprintf(stderr,"# choose_tail() %s[%lu] first_tail_stub is NULL (internal error)\n", group->head, position);
     group->chosen_tail_state[position] = NO_CHILD_NODES;
     return(NULL);
   }
 
-  /* find first "significant" tail. see find_first_tail() */
-  first_tail = find_first_tail(group->tails_at_position[position]);
-  group->first_tail[position] = first_tail->tail;
-  if(debug) fprintf(stderr,"# choose_tail() %s[%lu] first_tail = %s\n", group->head, position, first_tail->tail->simple_tail);
+  first_tail_stub = group->first_tail[position];
+  if(debug) fprintf(stderr,"# choose_tail() %s[%lu] first_tail = %s\n", group->head, position, first_tail_stub->tail->simple_tail);
 
   /* First preference - if the first-tail+value is unique, use that */
-  if( first_tail->tail->tail_value_found == 1 ) {
-      group->chosen_tail_state[position] = FIRST_TAIL;
-  }
-  if ( group->chosen_tail_state[position] == FIRST_TAIL ) {
-    if(debug) fprintf(stderr, "# choose_tail() [%lu] 1st preference: using first tail %s[%lu] %s=%s\n",position, group->head,position,first_tail->tail->simple_tail, first_tail->tail->value_qq);
-    return(first_tail->tail);
+  if( first_tail_stub->tail->tail_value_found == 1 ) {
+    group->chosen_tail_state[position] = FIRST_TAIL;
+    if(debug) fprintf(stderr, "# choose_tail() [%lu] 1st preference: using first tail %s[%lu] %s=%s\n",position, group->head,position,first_tail_stub->tail->simple_tail, first_tail_stub->tail->value_qq);
+    return(first_tail_stub->tail);
   }
 
   /* Second preference - find a unique tail+value that has only one value for this position and has the tail existing for all other positions */
-  for( tail_stub_ptr=first_tail; tail_stub_ptr!=NULL; tail_stub_ptr=tail_stub_ptr->next) {
+  for( tail_stub_ptr=first_tail_stub; tail_stub_ptr!=NULL; tail_stub_ptr=tail_stub_ptr->next) {
     if( tail_stub_ptr->tail->tail_value_found == 1 ) { /* tail_stub_ptr->tail->value can be NULL, just needs to be unique */
       int found=1;
       if (debug) fprintf(stderr, "# choose_tail() [%lu] found %s at", position, tail_stub_ptr->tail->simple_tail);
@@ -766,14 +812,14 @@ struct tail *choose_tail(struct group *group, unsigned long position ) {
       if ( found ) {
         /* This works only if chosen_tail->simple_tail is the first appearance of simple_tail at this position */
         struct tail_stub *tail_check_ptr;
-        for( tail_check_ptr=first_tail; tail_check_ptr != tail_stub_ptr; tail_check_ptr=tail_check_ptr->next) {
+        for( tail_check_ptr=first_tail_stub; tail_check_ptr != tail_stub_ptr; tail_check_ptr=tail_check_ptr->next) {
           if( strcmp(tail_check_ptr->tail->simple_tail, tail_stub_ptr->tail->simple_tail ) == 0 ) {
             found=0;
           }
         }
       }
       if ( found ) {
-        if (debug) fprintf(stderr, "# choose_tail() [%lu] 2nd preference first_tail: %s=%s found: %s = %s\n", position, first_tail->tail->simple_tail, first_tail->tail->value_qq,tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
+        if (debug) fprintf(stderr, "# choose_tail() [%lu] 2nd preference first_tail: %s=%s found: %s = %s\n", position, first_tail_stub->tail->simple_tail, first_tail_stub->tail->value_qq,tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
         group->chosen_tail_state[position] = CHOSEN_TAIL_START;
         return(tail_stub_ptr->tail);
       }
@@ -781,15 +827,16 @@ struct tail *choose_tail(struct group *group, unsigned long position ) {
   }
 
   /* Third preference - first tail is not unique but could make a unique combination with another tail */
-  struct subgroup *subgroup_ptr = find_or_create_subgroup(group, first_tail->tail);
-  for( tail_stub_ptr=first_tail->next; tail_stub_ptr!=NULL; tail_stub_ptr=tail_stub_ptr->next) {
+  struct subgroup *subgroup_ptr = find_or_create_subgroup(group, first_tail_stub->tail);
+  if( debug ) fprintf(stderr, "# choose_tail() [%lu] 3rd preference, first_tail=%s %s\n", position, first_tail_stub->tail->simple_tail, first_tail_stub->tail->value);
+  for( tail_stub_ptr=first_tail_stub->next; tail_stub_ptr!=NULL; tail_stub_ptr=tail_stub_ptr->next) {
     /* for each tail at this position (other than the first) */
     /* Find a tail at this position where:
      * a) tail+value is unique within this subgroup
      * b) tail exists at all positions within this subgroup
      */
     int found=1;
-    if (debug) fprintf(stderr, "choose_tail() [%lu] 3rd preference: first_tail: %s=%s, candidate: %s=%s\n", position, first_tail->tail->simple_tail, first_tail->tail->value_qq, tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
+    if (debug) fprintf(stderr, "choose_tail() [%lu] 3rd preference: first_tail: %s=%s, candidate: %s=%s\n", position, first_tail_stub->tail->simple_tail, first_tail_stub->tail->value_qq, tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
     for(ndx=0; subgroup_ptr->matching_positions[ndx] != 0; ndx++ ) {
       int pos=subgroup_ptr->matching_positions[ndx];
       if ( pos == position ) continue;
@@ -807,22 +854,22 @@ struct tail *choose_tail(struct group *group, unsigned long position ) {
     if ( found ) {
       /* This works only if chosen_tail->simple_tail is the first appearance of simple_tail at this position */
       struct tail_stub *tail_check_ptr;
-      for( tail_check_ptr=first_tail; tail_check_ptr != tail_stub_ptr; tail_check_ptr=tail_check_ptr->next) {
+      for( tail_check_ptr=first_tail_stub; tail_check_ptr != tail_stub_ptr; tail_check_ptr=tail_check_ptr->next) {
         if( strcmp(tail_check_ptr->tail->simple_tail, tail_stub_ptr->tail->simple_tail ) == 0 ) {
           found=0;
         }
       }
     }
     if ( found ) {
-      if (debug) fprintf(stderr, "choose_tail() [%lu] 3rd preference: first_tail: %s=%s, candidate: %s=%s\n", position, first_tail->tail->simple_tail, first_tail->tail->value_qq, tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
+      if (debug) fprintf(stderr, "choose_tail() [%lu] 3rd preference: first_tail: %s=%s, candidate: %s=%s\n", position, first_tail_stub->tail->simple_tail, first_tail_stub->tail->value_qq, tail_stub_ptr->tail->simple_tail, tail_stub_ptr->tail->value_qq);
       group->chosen_tail_state[position] = CHOSEN_TAIL_PLUS_FIRST_TAIL_START;
       return(tail_stub_ptr->tail);
     }
   }
   /* Fourth preference (fallback) - use first_tail PLUS the position with the subgroup */
-  if (debug) fprintf(stderr, "choose_tail() 4th preference: first_tail: %s=%s, position=%lu\n", first_tail->tail->simple_tail, first_tail->tail->value_qq, position);
+  if (debug) fprintf(stderr, "choose_tail() 4th preference: first_tail: %s=%s, position=%lu\n", first_tail_stub->tail->simple_tail, first_tail_stub->tail->value_qq, position);
   group->chosen_tail_state[position] = FIRST_TAIL_PLUS_POSITION;
-  return(first_tail->tail);
+  return(first_tail_stub->tail);
 }
 
 /* simple_tail_expr()
@@ -1119,7 +1166,7 @@ void choose_re_width(struct group *group) {
     unsigned int max_re_width_ft=0;
     unsigned int re_width;
     struct tail *chosen_tail = group->chosen_tail[position];
-    struct tail *first_tail  = group->first_tail[position];
+    struct tail *first_tail  = group->first_tail[position]->tail;
     struct tail *tail_ptr;
     for(tail_ptr = group->all_tails; tail_ptr != NULL; tail_ptr = tail_ptr->next) {
       if ( tail_ptr != chosen_tail ) {
@@ -1170,7 +1217,7 @@ void choose_pretty_width(struct group *group) {
   for(position=1; position<=group->max_position; position++) {
     struct tail *pretty_tail;
     if( group->chosen_tail_state[position] == CHOSEN_TAIL_PLUS_FIRST_TAIL_START ) {
-      pretty_tail = group->first_tail[position];
+      pretty_tail = group->first_tail[position]->tail;
     } else {
       pretty_tail = group->chosen_tail[position];
     }
@@ -1209,6 +1256,13 @@ void choose_all_tails() {
   struct group *group;
   for(ndx=0; ndx<num_groups; ndx++) {
     group=all_groups[ndx];
+    for(position=1; position<=group->max_position; position++) {
+      /* find_first_tail() - find first "significant" tail
+       * populate group->first_tail[] before calling choose_tail()
+       * We need these values for find_or_create_subgroup()
+       */
+      group->first_tail[position] = find_first_tail(group->tails_at_position[position]);
+    }
     for(position=1; position<=group->max_position; position++) {
       group->chosen_tail[position] = choose_tail(group, position);
     }
@@ -1594,20 +1648,21 @@ int main(int argc, char **argv) {
 
   if ( lens != NULL ) {
     /* Explict lens given, or inferred from --target */
+    char *filename;
     if(debug) fprintf(stderr,"Adding transform lens: %s   file: %s\n", lens, inputfile);
-    if ( target_file ) {
-      /* There's no need to output a transform, because we just searched for it anyway */
-      if (verbose) printf("transform %s incl %s\n", lens, target_file);
-    } else {
-      printf("setm /augeas/load/*[incl='%s' and label() != '%s']/excl '%s'\n", inputfile, lens, inputfile);
-      printf("transform %s incl %s\n", lens, inputfile);
-      printf("load-file %s\n", inputfile);
-    }
-
     if ( aug_transform(aug, lens, inputfile, 0) != 0 ) {
       fprintf(stderr, "%s\n", aug_error_details(aug));
       exit(1);
     }
+    if ( target_file ) {
+      filename = target_file;
+    } else {
+      filename = inputfile;
+    }
+    printf("setm /augeas/load/*[incl='%s' and label() != '%s']/excl '%s'\n", filename, lens, filename);
+    printf("transform %s incl %s\n", lens, filename);
+    printf("load-file %s\n", filename);
+
   } else {
     /* --lens not specified, print the default lens as a comment if --verbose specified */
     if( verbose ) {
@@ -1637,18 +1692,7 @@ int main(int argc, char **argv) {
 
   if ( target_file ) {
     /* Rename the tree from inputfile to target_file, if specified */
-    char *files_inputfile;
-    char *files_targetfile;
-    int  result;
-    result = asprintf(&files_inputfile, "/files%s", inputfile );
-    CHECK_OOM( result < 0, exit_oom, NULL);
-
-    result = asprintf(&files_targetfile, "/files%s", target_file );
-    CHECK_OOM( result < 0, exit_oom, NULL);
-
-    if( debug ) fprintf(stderr,"mv %s %s\n", files_inputfile, files_targetfile);
-    aug_mv(aug, files_inputfile, files_targetfile);
-    if( debug ) aug_print(aug, stderr, "/files");
+    move_tree(inputfile, target_file);
   }
 
   int num_matched;
