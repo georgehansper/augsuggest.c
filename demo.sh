@@ -6,8 +6,9 @@ echo '---------- hosts ------------'
 ./augsuggest --pretty --regexp --target=/etc/hosts test.hosts > test.hosts.augtool
 AUGEAS_ROOT=$PWD/tmp augtool -f test.hosts.augtool --noload --autosave
 
-diff -bu test.hosts tmp/etc/hosts
-echo '======== diff without "-b" to ignore spaces ============================'
+echo '======== diff with "-b" - ignore spaces ============================'
+diff -bu test.hosts tmp/etc/hosts && echo ''
+echo '======== diff without "-b" - do not ignore spaces ============================'
 diff -u test.hosts tmp/etc/hosts
 
 echo '---------- squid.conf ------------'
@@ -21,4 +22,4 @@ AUGEAS_ROOT=$PWD/tmp augtool -f test.sudoers.augtool --noload --autosave
 
 echo '========== augeas does not re-create empty lines for most lenses =========='
 echo '======== for new entries, we may get spaces where they are optional ======='
-diff -bu test.sudoers tmp/etc/sudoers
+diff -Bbu test.sudoers tmp/etc/sudoers

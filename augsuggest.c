@@ -85,27 +85,27 @@ static unsigned int flags = AUG_NONE;
 static unsigned int num_groups = 0;
 static struct group **all_groups=NULL;
 static char **all_matches;
+static int num_matched;
 static struct augeas_path_value **all_augeas_paths; /* array of pointers */
 
-int out_of_memory=0;
-int verbose=0;
-int debug=0;
-int pretty=0;
-int compact=0;
-int noseq=0;
-int help=0;
-int use_regexp=0;
-char *lens = NULL;
-char *loadpath = NULL;
+static int out_of_memory=0;
+static int verbose=0;
+static int debug=0;
+static int pretty=0;
+static int noseq=0;
+static int help=0;
+static int use_regexp=0;
+static char *lens = NULL;
+static char *loadpath = NULL;
 
-char *str_next_pos(char *start, char **head_end, unsigned long *pos);
-char *str_simplified_tail(char *tail_orig);
-void add_segment_to_group(struct path_segment *segment, struct augeas_path_value *);
-char *quote_value(char *);
-char *regexp_value(char *, int);
+static char *str_next_pos(char *start, char **head_end, unsigned long *pos);
+static char *str_simplified_tail(char *tail_orig);
+static void add_segment_to_group(struct path_segment *segment, struct augeas_path_value *);
+static char *quote_value(char *);
+static char *regexp_value(char *, int);
 
 
-void exit_oom(char *msg) {
+static void exit_oom(const char *msg) {
   fprintf(stderr, "Out of memory");
   if( msg ) {
     fprintf(stderr, " %s\n", msg);
@@ -118,7 +118,7 @@ void exit_oom(char *msg) {
 /* Remove /./ and /../ components from path
  * because they just don't work with augeas
  */
-void cleanup_filepath(char *path) {
+static void cleanup_filepath(char *path) {
   char *to=path, *from=path;
   while(*from) {
     if(*from == '/' ) {
@@ -145,7 +145,7 @@ void cleanup_filepath(char *path) {
   *to='\0';
 }
 
-char *find_lens_for_path(char *filename) {
+static char *find_lens_for_path(char *filename) {
   char *aug_load_path = NULL;
   char **matching_lenses;
   int  num_lenses, result, ndx;
@@ -181,7 +181,7 @@ char *find_lens_for_path(char *filename) {
   return(lens);
 }
 
-void move_tree(char *inputfile, char *target_file) {
+static void move_tree(char *inputfile, char *target_file) {
   char *files_inputfile;
   char *files_targetfile;
   char *dangling_path;
@@ -243,7 +243,7 @@ void move_tree(char *inputfile, char *target_file) {
  *
  * If label_a or label_b is absent, use seq::* or * instead in the simplified tail, head is unaffected
  */
-struct path_segment *split_path(struct augeas_path_value *path_value) {
+static struct path_segment *split_path(struct augeas_path_value *path_value) {
   char *path = path_value->path;
   struct path_segment *first_segment = NULL;
   struct path_segment *this_segment = NULL;
@@ -294,7 +294,7 @@ struct path_segment *split_path(struct augeas_path_value *path_value) {
  *   - returns a pointer to the terminating '\0' (same as head_end)
  * ie. look for [123] or /123/ or /123\0, set int pos to 123 or ULONG_MAX, set head_end to char before '[' or before 1st digit; return pointer to trailing / or \0
 */
-char *str_next_pos(char *start, char **head_end, unsigned long *pos) {
+static char *str_next_pos(char *start, char **head_end, unsigned long *pos) {
   char *endptr=NULL;
   char *s=start;
   *pos=ULONG_MAX;
@@ -320,7 +320,7 @@ char *str_next_pos(char *start, char **head_end, unsigned long *pos) {
   return(s);
 }
 
-char *str_simplified_tail(char *tail_orig) {
+static char *str_simplified_tail(char *tail_orig) {
   int tail_len=0;
   char *tail;
   char *from, *to, *scan;
@@ -400,7 +400,7 @@ char *str_simplified_tail(char *tail_orig) {
  * set *matched to the number of characters in common
  * return 1 (true) if the strings match, otherwise 0 (false)
  */
-int value_cmp(char *v1, char *v2, unsigned int *matched) {
+static int value_cmp(char *v1, char *v2, unsigned int *matched) {
   char *s1, *s2;
   if( v1 == NULL && v2 == NULL ) {
     *matched = 0;
@@ -441,7 +441,7 @@ int value_cmp(char *v1, char *v2, unsigned int *matched) {
  * If no such group exists, create a new one
  * Update the size of all_groups array if required
  */
-struct group *find_or_create_group(char *head) {
+static struct group *find_or_create_group(char *head) {
   unsigned long ndx;
   struct group **all_groups_realloc;
   unsigned int num_groups_newsize;
@@ -493,7 +493,7 @@ struct group *find_or_create_group(char *head) {
  * If no such tail exists, append a new (struct tail) list item
  * Return the tail found, or the new fail
  */
-struct tail *find_or_create_tail(struct group *group, struct path_segment *path_seg, struct augeas_path_value *path_value) {
+static struct tail *find_or_create_tail(struct group *group, struct path_segment *path_seg, struct augeas_path_value *path_value) {
   /* Scan for a matching simplified tail+value in group->all_tails */
   struct tail *tail;
   struct tail *found_tail_value=NULL;
@@ -564,7 +564,7 @@ struct tail *find_or_create_tail(struct group *group, struct path_segment *path_
 }
 
 /* Append a (struct tail_stub) to the linked list group->tails_at_position[position] */
-void append_tail_stub(struct group *group, struct tail *tail, unsigned long position) {
+static void append_tail_stub(struct group *group, struct tail *tail, unsigned long position) {
   struct tail_stub **tail_stub_pp;
   if(debug) fprintf(stderr,"append_tail_stub() position=%lu size=%lu tail=%s value=%s\n",position, group->position_array_size, tail->simple_tail, tail->value_qq);
 
@@ -581,7 +581,7 @@ void append_tail_stub(struct group *group, struct tail *tail, unsigned long posi
 /* Grow memory structures within the group record and associated tail records
  * to accommodate additional positions
  */
-void grow_position_arrays(struct group *group, unsigned long new_max_position) {
+static void grow_position_arrays(struct group *group, unsigned long new_max_position) {
   struct tail_stub **tails_at_position_realloc;
   struct tail      **chosen_tail_realloc;
   struct tail_stub **first_tail_realloc;
@@ -589,6 +589,7 @@ void grow_position_arrays(struct group *group, unsigned long new_max_position) {
   unsigned int      *pretty_width_ct_realloc;
   unsigned int      *re_width_ct_realloc;
   unsigned int      *re_width_ft_realloc;
+  unsigned long      ndx;
   if( new_max_position != ULONG_MAX && new_max_position >= group->position_array_size ) {
     unsigned long old_size = group->position_array_size;
     unsigned long new_size = (new_max_position+1) / 8 * 8 + 8;
@@ -607,7 +608,6 @@ void grow_position_arrays(struct group *group, unsigned long new_max_position) {
                ! first_tail_realloc, exit_oom, "in grow_position_arrays()");
 
     /* initialize array entries between old size to new_size */
-    unsigned long ndx;
     for( ndx=old_size; ndx < new_size; ndx++) {
       tails_at_position_realloc[ndx]=NULL;
       chosen_tail_realloc[ndx]=NULL;
@@ -634,7 +634,6 @@ void grow_position_arrays(struct group *group, unsigned long new_max_position) {
       CHECK_OOM( ! tail_found_map_realloc || ! tail_value_found_map_realloc, exit_oom, "in grow_position_arrays()");
 
       /* initialize array entries between old size to new_size */
-      unsigned long ndx;
       for( ndx=old_size; ndx < new_size; ndx++) {
         tail_found_map_realloc[ndx]=0;
         tail_value_found_map_realloc[ndx]=0;
@@ -646,7 +645,7 @@ void grow_position_arrays(struct group *group, unsigned long new_max_position) {
   }
 }
 
-void add_segment_to_group(struct path_segment *path_seg, struct augeas_path_value *path_value) {
+static void add_segment_to_group(struct path_segment *path_seg, struct augeas_path_value *path_value) {
   struct group *group = NULL;
   struct tail  *tail;
   group = find_or_create_group(path_seg->head);
@@ -669,7 +668,7 @@ void add_segment_to_group(struct path_segment *path_seg, struct augeas_path_valu
 /* find_or_create_subgroup()
  * This is called from choose_tail(), and is only used if we need to go to our 3rd Preference
  */
-struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first_tail) {
+static struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first_tail) {
   struct subgroup *subgroup_ptr;
   struct subgroup **sg_pp;
   if( debug ) fprintf(stderr, "# find_or_create_subgroup() first_tail@%lx =%s = %s\n", (long unsigned int) first_tail, first_tail->simple_tail, first_tail->value);
@@ -725,7 +724,7 @@ struct subgroup *find_or_create_subgroup(struct group *group, struct tail *first
  * return true(1)  if parent == /path and child == /path/tail
  * return false(0) if child == /pathother or child == /pat or anything else
  */
-int str_ischild(char *parent, char *child) {
+static int str_ischild(char *parent, char *child) {
   while( *parent ) {
     if( *parent != *child ) {
       return(0);
@@ -751,7 +750,7 @@ int str_ischild(char *parent, char *child) {
    *   head/123/tail2
    * then head/123/tail/child is significant, and that becomes the first_tail
    */
-struct tail_stub *find_first_tail(struct tail_stub *tail_stub_ptr) {
+static struct tail_stub *find_first_tail(struct tail_stub *tail_stub_ptr) {
   if( tail_stub_ptr == NULL )
     return(NULL);
   for( ; tail_stub_ptr->next != NULL; tail_stub_ptr=tail_stub_ptr->next ) {
@@ -766,7 +765,7 @@ struct tail_stub *find_first_tail(struct tail_stub *tail_stub_ptr) {
   return(tail_stub_ptr);
 }
 
-struct tail *choose_tail(struct group *group, unsigned long position ) {
+static struct tail *choose_tail(struct group *group, unsigned long position ) {
   struct tail_stub *first_tail_stub;
   struct tail_stub *tail_stub_ptr;
   unsigned int ndx;
@@ -876,7 +875,7 @@ struct tail *choose_tail(struct group *group, unsigned long position ) {
  * given a simple_tail of the form "/path" or ""
  * return "path" or "."
  */
-char *simple_tail_expr(char *simple_tail) {
+static const char *simple_tail_expr(char *simple_tail) {
   if( *simple_tail == '/' ) {
     /* usual case - .../123/... or /label[123]/... */
     return(simple_tail+1);
@@ -890,8 +889,8 @@ char *simple_tail_expr(char *simple_tail) {
 }
 
 /* Write out the path-segment, up to and including the [ expr ] (if required) */
-void output_segment(struct path_segment *ps_ptr, struct augeas_path_value *path_value_seg) {
-  char *last_c;
+static void output_segment(struct path_segment *ps_ptr, struct augeas_path_value *path_value_seg) {
+  char *last_c, *str;
   struct group *group;
   struct tail *chosen_tail;
   unsigned long position;
@@ -901,7 +900,9 @@ void output_segment(struct path_segment *ps_ptr, struct augeas_path_value *path_
   char *value_qq = path_value_seg->value_qq;
 
   /* print segment possibly followed by * or seq::* */
-  for(char *s=ps_ptr->segment; *s; last_c=s++);
+  last_c=ps_ptr->segment;
+  for(str=ps_ptr->segment; *str; last_c=str++)  /* find end of string */
+    ;
   if(*last_c=='/') {
     /* sequential position .../123 */
     if ( noseq )
@@ -934,7 +935,7 @@ void output_segment(struct path_segment *ps_ptr, struct augeas_path_value *path_
   switch( chosen_tail_state ) {
     case CHOSEN_TAIL_START:
       group->chosen_tail_state[position] = CHOSEN_TAIL_WIP;
-      /* drop through */
+      __attribute__ ((fallthrough));   /* drop through */
     case FIRST_TAIL:
     case CHOSEN_TAIL_DONE:
     case FIRST_TAIL_PLUS_POSITION:
@@ -1094,7 +1095,7 @@ void output_segment(struct path_segment *ps_ptr, struct augeas_path_value *path_
   }
 }
 
-void output_path(struct augeas_path_value *path_value_seg) {
+static void output_path(struct augeas_path_value *path_value_seg) {
   struct path_segment *ps_ptr;
   printf("set ");
   for( ps_ptr=path_value_seg->segments; ps_ptr != NULL; ps_ptr=ps_ptr->next) {
@@ -1107,7 +1108,7 @@ void output_path(struct augeas_path_value *path_value_seg) {
   }
 }
 
-void output(int num_matched, struct augeas_path_value **all_augeas_paths ) {
+static void output(void) {
   int ndx;   /* index to matches() */
   struct augeas_path_value  *path_value_seg;
   char *value;
@@ -1155,7 +1156,7 @@ void output(int num_matched, struct augeas_path_value **all_augeas_paths ) {
   }
 }
 
-void choose_re_width(struct group *group) {
+static void choose_re_width(struct group *group) {
   unsigned long position;
   /* For each position, compare the value of chosen_tail with 
    * all other matching simple_tails in the group, to find the minimum
@@ -1211,7 +1212,7 @@ void choose_re_width(struct group *group) {
   } /* for position 1..max_position */
 }
 
-void choose_pretty_width(struct group *group) {
+static void choose_pretty_width(struct group *group) {
   unsigned long position;
   int value_len;
   for(position=1; position<=group->max_position; position++) {
@@ -1250,7 +1251,7 @@ void choose_pretty_width(struct group *group) {
 
 /* populate group->chosen_tail[] and group->first_tail[] arrays */
 /* Also call choose_re_width() and choose_pretty_width() to populate group->re_width_ct[] ..->re_width_ft[] and ..->pretty_width_ft[] */
-void choose_all_tails() {
+static void choose_all_tails(void) {
   int ndx;   /* index to all_groups() */
   unsigned long position;
   struct group *group;
@@ -1279,7 +1280,7 @@ void choose_all_tails() {
  * Quotes are not strictly require for the value, but they _are_ required
  * for values within the path-expressions
  */
-char *quote_value(char *value) {
+static char *quote_value(char *value) {
   char *s, *t, *value_qq, quote;
   int len=0;
   int has_q=0;
@@ -1350,7 +1351,7 @@ char *quote_value(char *value) {
 
 /* Create a quoted regular expression from the value, using single quotes if possible
  */
-char *regexp_value(char *value, int max_len) {
+static char *regexp_value(char *value, int max_len) {
   char *s, *t, *value_re, quote;
   int len=0;
   int has_q=0;
@@ -1456,7 +1457,7 @@ char *regexp_value(char *value, int max_len) {
   return(value_re);
 }
 
-void usage(char *progname) {
+static void usage(const char *progname) {
   if(progname == NULL)
     progname = "augsuggest";
   fprintf(stdout, "Usage:\n\t%s [--target=realname] [--lens=Lensname] [--pretty] [--regexp[=n]] [--noseq] /path/filename\n\n",progname);
@@ -1489,6 +1490,7 @@ int main(int argc, char **argv) {
   char *inputfile = NULL;
   char *target_file = NULL;
   char *program_name = basename(argv[0]);
+  char *value;
 
   while (1) {
     int option_index = 0;
@@ -1695,8 +1697,6 @@ int main(int argc, char **argv) {
     move_tree(inputfile, target_file);
   }
 
-  int num_matched;
-  char *value;
   /* There is a subtle difference between "/files//(star)" and "/files/descendant::(star)" in the order that matches appear */
   /* descendant::* is better suited, as it allows us to prune out intermediate nodes with null values (directory-like nodes) */
   /* These would be created implicity by "set" */
@@ -1721,8 +1721,8 @@ int main(int argc, char **argv) {
     all_augeas_paths[ndx]->value_qq = quote_value(value);
     all_augeas_paths[ndx]->segments = split_path(all_augeas_paths[ndx]);
   }
-  choose_all_tails(num_matched, all_augeas_paths);
-  output(num_matched, all_augeas_paths);
+  choose_all_tails();
+  output();
 
   exit(0);
 }
