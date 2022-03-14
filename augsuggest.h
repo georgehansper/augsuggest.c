@@ -13,12 +13,14 @@
  *
  * You should have received a copy of the GNU General Public License along with this program.
  * If not, see <https://www.gnu.org/licenses/>.
+ *
+ * Author: George Hansper <george@hansper.id.au>
  * -----------------------------------------------------------------------
  *
  Have:
      /head/label_a[pos1]/mid/label_b[pos2]/tail  value_a1_b1
      /head/label_a[pos3]/mid/label_b[pos4]/tail  value_a2_b1
- *
+
  +-------------------------------------------------------+
  | augeas_path_value                                     |
  |   path = "/head/label_a[pos1]/mid/label_b[pos2]/tail" |
@@ -119,7 +121,7 @@ struct tail_stub {
  */
 struct subgroup {
   struct tail      *first_tail;
-  unsigned long    *matching_positions;   /* zero-terminated array of positions with the same first_tail */
+  unsigned int     *matching_positions;   /* zero-terminated array of positions with the same first_tail */
   struct subgroup  *next;
 };
 
@@ -142,11 +144,11 @@ struct group {
   struct tail_stub      **tails_at_position;     /* array of linked-lists, index is position */
   struct tail           **chosen_tail;           /* array of (struct tail)      pointers, index is position */
   struct tail_stub      **first_tail;            /* array of (struct tail_stub) pointers, index is position */
-  unsigned long           max_position;          /* highest position seen for this group */
-  unsigned long           position_array_size;   /* array size for arrays indexed by position, >= max_position+1, used for malloc() */
+  unsigned int            max_position;          /* highest position seen for this group */
+  unsigned int            position_array_size;   /* array size for arrays indexed by position, >= max_position+1, used for malloc() */
   chosen_tail_state_t    *chosen_tail_state;     /* array, index is position */
   struct subgroup        *subgroups;             /* Linked list, subgroups based on common first-tail - used only for 3rd preference and fallback */
-  unsigned long          *subgroup_position;     /* array, position within subgroup for this position - used only for fallback */
+  unsigned int           *subgroup_position;     /* array, position within subgroup for this position - used only for fallback */
   /* For --pretty */
   unsigned int           *pretty_width_ct;      /* array, index is position, value width to use for --pretty */
   /* For --regexp */
@@ -158,7 +160,7 @@ struct path_segment {
   char                *head;
   char                *segment;
   char                *simplified_tail;
-  unsigned long        position;
+  unsigned int         position;
   struct group        *group;
   struct path_segment *next;
 };

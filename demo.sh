@@ -20,6 +20,6 @@ echo '---------- sudoers ------------'
 ./augsuggest --pretty          --target=/etc/sudoers test.sudoers > test.sudoers.augtool
 AUGEAS_ROOT=$PWD/tmp augtool -f test.sudoers.augtool --noload --autosave
 
-echo '========== augeas does not re-create empty lines for most lenses =========='
-echo '======== for new entries, we may get spaces where they are optional ======='
+echo '================= augeas does not re-create empty lines for most lenses ================='
+echo '====== for recreated entries, we may get spaces appearing where they were optional ======'
 diff -Bbu test.sudoers tmp/etc/sudoers
